@@ -290,7 +290,7 @@ const SUPABASE_ANON_KEY = 'sb_publishable_P6sTnP3ClwyiP6kuiBlTjw_cPH2GZii';
 // ============================================================================
 // State
 // ============================================================================
-var supabase = null;
+var db = null;
 var currentUser = null;
 var state = {
   route: 'dashboard',      // 'dashboard' | 'patient'
@@ -372,17 +372,17 @@ async function loadDashboard() {
   state.loading = true;
   render();
 
-  let query = supabase.from('patients').select('*').order('created_at', { ascending: false });
+  let query = db.from('patients').select('*').order('created_at', { ascending: false });
   if (state.searchQuery) query = query.ilike('name', `%${state.searchQuery}%`);
   if (state.filter === 'active') query = query.is('date_of_discharge', null);
   if (state.filter === 'discharged') query = query.not('date_of_discharge', 'is', null);
 
   const [patientsRes, totalRes, activeRes, hbotRes, npwtRes] = await Promise.all([
     query,
-    supabase.from('patients').select('id', { count: 'exact', head: true }),
-    supabase.from('patients').select('id', { count: 'exact', head: true }).is('date_of_discharge', null),
-    supabase.from('hbot_sessions').select('id', { count: 'exact', head: true }),
-    supabase.from('npwt_sessions').select('id', { count: 'exact', head: true })
+    db.from('patients').select('id', { count: 'exact', head: true }),
+    db.from('patients').select('id', { count: 'exact', head: true }).is('date_of_discharge', null),
+    db.from('hbot_sessions').select('id', { count: 'exact', head: true }),
+    db.from('npwt_sessions').select('id', { count: 'exact', head: true })
   ]);
 
   if (patientsRes.error) {
@@ -406,11 +406,11 @@ async function loadPatient(id) {
   render();
 
   const [patientRes, entriesRes, hbotRes, npwtRes, imagesRes] = await Promise.all([
-    supabase.from('patients').select('*').eq('id', id).single(),
-    supabase.from('patient_entries').select('*').eq('patient_id', id).order('date', { ascending: false }),
-    supabase.from('hbot_sessions').select('*').eq('patient_id', id).order('date', { ascending: false }),
-    supabase.from('npwt_sessions').select('*').eq('patient_id', id).order('date', { ascending: false }),
-    supabase.from('images').select('*').eq('patient_id', id).order('created_at', { ascending: false })
+    db.from('patients').select('*').eq('id', id).single(),
+    db.from('patient_entries').select('*').eq('patient_id', id).order('date', { ascending: false }),
+    db.from('hbot_sessions').select('*').eq('patient_id', id).order('date', { ascending: false }),
+    db.from('npwt_sessions').select('*').eq('patient_id', id).order('date', { ascending: false }),
+    db.from('images').select('*').eq('patient_id', id).order('created_at', { ascending: false })
   ]);
 
   if (patientRes.error) {
@@ -434,7 +434,7 @@ async function loadPatient(id) {
 // Mutations
 // ============================================================================
 async function createPatient(form) {
-  const { data, error } = await supabase.from('patients').insert({
+  const { data, error } = await db.from('patients').insert({
     name: form.name.value,
     age: Number(form.age.value),
     sex: form.sex.value,
@@ -449,7 +449,7 @@ async function createPatient(form) {
 }
 
 async function createEntry(form, files, imageLabel) {
-  const { data: entry, error: entryErr } = await supabase.from('patient_entries').insert({
+  const { data: entry, error: entryErr } = await db.from('patient_entries').insert({
     patient_id: state.patientId,
     operator: form.operator.value,
     notes: form.notes.value,
@@ -463,15 +463,15 @@ async function createEntry(form, files, imageLabel) {
     const ext = file.name.split('.').pop() || 'jpg';
     const path = `${state.patientId}/${entry.id}/${crypto.randomUUID()}.${ext}`;
 
-    const { error: upErr } = await supabase.storage
+    const { error: upErr } = await db.storage
       .from('patient-images')
       .upload(path, file, { cacheControl: '3600', upsert: false });
 
     if (upErr) throw new Error('Image upload failed: ' + upErr.message);
 
-    const { data: pub } = supabase.storage.from('patient-images').getPublicUrl(path);
+    const { data: pub } = db.storage.from('patient-images').getPublicUrl(path);
 
-    const { error: imgErr } = await supabase.from('images').insert({
+    const { error: imgErr } = await db.from('images').insert({
       patient_id: state.patientId,
       entry_id: entry.id,
       image_url: pub.publicUrl,
@@ -487,7 +487,7 @@ async function createEntry(form, files, imageLabel) {
 
 async function createProcedure(kind, date) {
   const table = kind === 'hbot' ? 'hbot_sessions' : 'npwt_sessions';
-  const { error } = await supabase.from(table).insert({
+  const { error } = await db.from(table).insert({
     patient_id: state.patientId,
     date: date
   });
@@ -499,7 +499,7 @@ async function createProcedure(kind, date) {
 
 async function toggleDischarge() {
   const newValue = state.patient.date_of_discharge ? null : new Date().toISOString().slice(0, 10);
-  const { error } = await supabase.from('patients')
+  const { error } = await db.from('patients')
     .update({ date_of_discharge: newValue })
     .eq('id', state.patientId);
   if (error) {
@@ -684,14 +684,14 @@ async function handleLogin(form, mode) {
   const email = form.email.value;
   const password = form.password.value;
   const { error } = mode === 'signin'
-    ? await supabase.auth.signInWithPassword({ email, password })
-    : await supabase.auth.signUp({ email, password });
+    ? await db.auth.signInWithPassword({ email, password })
+    : await db.auth.signUp({ email, password });
   if (error) throw error;
   if (mode === 'signup') {
     toast('Account created. Check your email, then sign in.');
     return;
   }
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { user } } = await db.auth.getUser();
   currentUser = user;
   state.route = 'dashboard';
   render();
@@ -699,7 +699,7 @@ async function handleLogin(form, mode) {
 }
 
 async function signOut() {
-  await supabase.auth.signOut();
+  await db.auth.signOut();
   currentUser = null;
   render();
 }
@@ -720,7 +720,7 @@ const SUPABASE_ANON_KEY = 'sb_publishable_P6sTnP3ClwyiP6kuiBlTjw_cPH2GZii';</pre
   `;
 }
 
-var loginMode = "signin";
+var loginMode = 'signin';
 
 function renderLogin() {
   return `
@@ -1089,9 +1089,9 @@ async function init() {
     return;
   }
 
-  supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-  const { data: { session } } = await supabase.auth.getSession();
+  const { data: { session } } = await db.auth.getSession();
   if (session) {
     currentUser = session.user;
     render();
@@ -1100,7 +1100,7 @@ async function init() {
     render();
   }
 
-  supabase.auth.onAuthStateChange((_event, session) => {
+  db.auth.onAuthStateChange((_event, session) => {
     currentUser = session?.user || null;
     if (!currentUser) render();
   });
