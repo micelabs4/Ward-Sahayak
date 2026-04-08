@@ -290,9 +290,9 @@ const SUPABASE_ANON_KEY = 'sb_publishable_P6sTnP3ClwyiP6kuiBlTjw_cPH2GZii';
 // ============================================================================
 // State
 // ============================================================================
-let supabase = null;
-let currentUser = null;
-let state = {
+var supabase = null;
+var currentUser = null;
+var state = {
   route: 'dashboard',      // 'dashboard' | 'patient'
   patientId: null,
   patients: [],
@@ -720,7 +720,7 @@ const SUPABASE_ANON_KEY = 'sb_publishable_P6sTnP3ClwyiP6kuiBlTjw_cPH2GZii';</pre
   `;
 }
 
-let loginMode = 'signin';
+var loginMode = "signin";
 
 function renderLogin() {
   return `
@@ -1020,7 +1020,7 @@ async function goPatient(id) {
   await loadPatient(id);
 }
 
-let searchTimer;
+var searchTimer;
 function setFilter(f) {
   state.filter = f;
   loadDashboard();
