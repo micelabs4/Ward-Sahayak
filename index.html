@@ -115,6 +115,9 @@
   .nav-item.active { background: var(--fg); color: var(--bg); font-weight: 500; }
   .sidebar-footer { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 12px; display: flex; flex-direction: column; gap: 2px; }
   .sidebar-footer .email { padding: 6px 12px; font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+  .profile-info { padding: 8px 12px; border-top: 1px solid var(--border); margin-top: 6px; }
+  .profile-name { font-size: 12px; font-weight: 500; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .profile-hou { font-size: 10px; color: var(--muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   main.main { flex: 1; padding: 40px; max-width: 100%; overflow-x: auto; }
   .page-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 28px; gap: 16px; flex-wrap: wrap; }
@@ -445,6 +448,7 @@ const SUPABASE_ANON_KEY = 'sb_publishable_P6sTnP3ClwyiP6kuiBlTjw_cPH2GZii';
 // ============================================================================
 var db = null;
 var currentUser = null;
+var currentProfile = null;
 var state = {
   route: 'dashboard',      // 'dashboard' | 'patient'
   patientId: null,
@@ -758,7 +762,7 @@ function openAddEntryModal() {
         </div>
         <div class="form-row">
           <label class="lbl">Operator</label>
-          <input name="operator" required placeholder="Dr. Smith" />
+          <input name="operator" required placeholder="Dr. Smith" value="${escapeHtml(currentProfile?.name || '')}" />
         </div>
       </div>
       <div class="form-row">
@@ -833,19 +837,53 @@ function openLightbox(url, label) {
 // ============================================================================
 // Auth
 // ============================================================================
-async function handleLogin(form, mode) {
-  const email = form.email.value;
-  const password = form.password.value;
-  const { error } = mode === 'signin'
-    ? await db.auth.signInWithPassword({ email, password })
-    : await db.auth.signUp({ email, password });
-  if (error) throw error;
-  if (mode === 'signup') {
-    toast('Account created. Check your email, then sign in.');
+async function loadProfile() {
+  if (!currentUser) { currentProfile = null; return; }
+  const { data, error } = await db.from('profiles').select('*').eq('id', currentUser.id).maybeSingle();
+  if (error) {
+    console.error('Failed to load profile:', error);
+    currentProfile = null;
     return;
   }
+  currentProfile = data;
+}
+
+async function handleLogin(form, mode) {
+  const email = form.email.value.trim();
+  const password = form.password.value;
+
+  if (mode === 'signup') {
+    const name = form.name.value.trim();
+    const houName = form.hou_name.value.trim();
+    if (!name || !houName) throw new Error('Name and Head of Unit are required');
+
+    // Pass name + hou_name in user metadata — the DB trigger will create a profile row
+    const { error: signUpErr } = await db.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { name, hou_name: houName }
+      }
+    });
+    if (signUpErr) throw signUpErr;
+
+    // With email confirmation disabled, we can sign the user in right away
+    const { error: signInErr } = await db.auth.signInWithPassword({ email, password });
+    if (signInErr) {
+      // If confirmation is still on, user needs to verify
+      toast('Account created. Please verify your email and sign in.');
+      window.loginMode = 'signin';
+      render();
+      return;
+    }
+  } else {
+    const { error } = await db.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+  }
+
   const { data: { user } } = await db.auth.getUser();
   currentUser = user;
+  await loadProfile();
   state.route = 'dashboard';
   render();
   await loadDashboard();
@@ -854,6 +892,7 @@ async function handleLogin(form, mode) {
 async function signOut() {
   await db.auth.signOut();
   currentUser = null;
+  currentProfile = null;
   render();
 }
 
@@ -876,29 +915,40 @@ const SUPABASE_ANON_KEY = 'sb_publishable_P6sTnP3ClwyiP6kuiBlTjw_cPH2GZii';</pre
 var loginMode = 'signin';
 
 function renderLogin() {
+  const isSignup = loginMode === 'signup';
   return `
     <div class="login-page">
       <div class="card login-card">
         <div class="login-header">
           <h1 class="login-title">Diabetic Foot Registry</h1>
-          <div class="login-sub">${loginMode === 'signin' ? 'Sign in to continue' : 'Create a new account'}</div>
+          <div class="login-sub">${isSignup ? 'Create a new account' : 'Sign in to continue'}</div>
         </div>
         <form id="login-form">
+          ${isSignup ? `
+            <div class="form-row">
+              <label class="lbl">Full name</label>
+              <input name="name" required placeholder="Dr. Jane Doe" />
+            </div>
+            <div class="form-row">
+              <label class="lbl">Head of Unit</label>
+              <input name="hou_name" required placeholder="Dr. Smith" />
+            </div>
+          ` : ''}
           <div class="form-row">
             <label class="lbl">Email</label>
-            <input name="email" type="email" required />
+            <input name="email" type="email" required autocomplete="email" />
           </div>
           <div class="form-row">
             <label class="lbl">Password</label>
-            <input name="password" type="password" required minlength="6" />
+            <input name="password" type="password" required minlength="6" autocomplete="${isSignup ? 'new-password' : 'current-password'}" />
           </div>
           <div class="error-msg"></div>
           <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center; margin-top:6px;">
-            ${loginMode === 'signin' ? 'Sign in' : 'Sign up'}
+            ${isSignup ? 'Create account' : 'Sign in'}
           </button>
         </form>
         <button class="login-switch" onclick="loginMode = loginMode === 'signin' ? 'signup' : 'signin'; render();">
-          ${loginMode === 'signin' ? "Don't have an account? Sign up" : 'Already have an account? Sign in'}
+          ${isSignup ? 'Already have an account? Sign in' : "Don't have an account? Sign up"}
         </button>
       </div>
     </div>
@@ -925,7 +975,12 @@ function renderSidebar() {
         <button class="nav-item" onclick="toggleTheme()">
           ${isDark ? icons.sun : icons.moon}<span class="theme-label">${isDark ? 'Light mode' : 'Dark mode'}</span>
         </button>
-        ${currentUser ? `<div class="email">${escapeHtml(currentUser.email)}</div>` : ''}
+        ${currentProfile ? `
+          <div class="profile-info">
+            <div class="profile-name">${escapeHtml(currentProfile.name)}</div>
+            <div class="profile-hou">HOU: ${escapeHtml(currentProfile.hou_name)}</div>
+          </div>
+        ` : currentUser ? `<div class="email">${escapeHtml(currentUser.email)}</div>` : ''}
         <button class="nav-item" onclick="signOut()">
           ${icons.logout}<span>Sign out</span>
         </button>
@@ -1276,15 +1331,21 @@ async function init() {
   const { data: { session } } = await db.auth.getSession();
   if (session) {
     currentUser = session.user;
+    await loadProfile();
     render();
     await loadDashboard();
   } else {
     render();
   }
 
-  db.auth.onAuthStateChange((_event, session) => {
+  db.auth.onAuthStateChange(async (_event, session) => {
     currentUser = session?.user || null;
-    if (!currentUser) render();
+    if (currentUser) {
+      await loadProfile();
+    } else {
+      currentProfile = null;
+      render();
+    }
   });
 }
 
