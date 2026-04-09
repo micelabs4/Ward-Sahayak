@@ -204,6 +204,25 @@
   .patient-head { padding: 24px; margin-bottom: 18px; }
   .patient-head-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
   .patient-name { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 4px; }
+  .patient-mrd {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--muted);
+    background: rgba(128,128,128,0.08);
+    padding: 3px 10px;
+    border-radius: 6px;
+    margin-top: 6px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+  }
+  .cell-mrd { font-variant-numeric: tabular-nums; font-size: 12px; }
+  .cell-mrd-mobile {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 3px;
+    font-variant-numeric: tabular-nums;
+  }
   .patient-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 16px 24px; margin-top: 14px; }
   .meta-item .lbl-text { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
   .meta-item .val { font-size: 13px; margin-top: 2px; }
@@ -722,7 +741,11 @@ async function loadDashboard() {
   render();
 
   let query = db.from('patients').select('*').order('created_at', { ascending: false });
-  if (state.searchQuery) query = query.ilike('name', `%${state.searchQuery}%`);
+  if (state.searchQuery) {
+    // Match name OR mrd_number (case-insensitive)
+    const q = state.searchQuery.replace(/[,()]/g, ''); // sanitize .or() syntax chars
+    query = query.or(`name.ilike.%${q}%,mrd_number.ilike.%${q}%`);
+  }
   if (state.filter === 'active') query = query.is('date_of_discharge', null);
   if (state.filter === 'discharged') query = query.not('date_of_discharge', 'is', null);
 
@@ -783,14 +806,43 @@ async function loadPatient(id) {
 // Mutations
 // ============================================================================
 async function createPatient(form) {
+  const mrd = form.mrd_number.value.trim();
+
+  // Validate alphanumeric (letters + digits only, no spaces or symbols)
+  if (!/^[A-Za-z0-9]+$/.test(mrd)) {
+    throw new Error('MRD Number must contain only letters and digits (no spaces or symbols)');
+  }
+
+  // Duplicate check — look for an existing patient with the same MRD (case-insensitive)
+  const { data: existing, error: lookupErr } = await db
+    .from('patients')
+    .select('id, name')
+    .ilike('mrd_number', mrd)
+    .maybeSingle();
+
+  if (lookupErr && lookupErr.code !== 'PGRST116') {
+    // PGRST116 = no rows, which is what we want
+    throw lookupErr;
+  }
+  if (existing) {
+    throw new Error(`MRD Number "${mrd}" is already registered to ${existing.name}`);
+  }
+
   const { data, error } = await db.from('patients').insert({
-    name: form.name.value,
+    name: form.name.value.trim(),
     age: Number(form.age.value),
     sex: form.sex.value,
-    date_of_admission: form.date_of_admission.value
+    date_of_admission: form.date_of_admission.value,
+    mrd_number: mrd
   }).select('id').single();
 
-  if (error) throw error;
+  if (error) {
+    // If the DB unique index catches a race-condition duplicate, show a friendly message
+    if (error.code === '23505' || /duplicate/i.test(error.message)) {
+      throw new Error(`MRD Number "${mrd}" is already registered`);
+    }
+    throw error;
+  }
   toast('Patient created');
   closeModal();
   state.route = 'patient';
@@ -940,6 +992,10 @@ function openNewPatientModal() {
   openModal('New Patient', `
     <form>
       <div class="form-row">
+        <label class="lbl">MRD Number</label>
+        <input name="mrd_number" id="mrd-number-input" required placeholder="e.g. 2026123456" pattern="[A-Za-z0-9]+" title="Letters and digits only, no spaces or symbols" />
+      </div>
+      <div class="form-row">
         <label class="lbl">Full name</label>
         <input name="name" required placeholder="Jane Doe" />
       </div>
@@ -968,6 +1024,15 @@ function openNewPatientModal() {
       </div>
     </form>
   `, createPatient);
+
+  // Strip invalid characters live as the user types (error prevention 101)
+  const mrdInput = document.querySelector('#mrd-number-input');
+  if (mrdInput) {
+    mrdInput.addEventListener('input', (e) => {
+      const cleaned = e.target.value.replace(/[^A-Za-z0-9]/g, '');
+      if (cleaned !== e.target.value) e.target.value = cleaned;
+    });
+  }
 }
 
 function openAddEntryModal() {
@@ -1317,12 +1382,17 @@ function renderDashboard() {
   ];
 
   const tableRows = state.patients.length === 0
-    ? `<tr><td colspan="5" class="empty">${state.loading ? 'Loading...' : 'No patients found.'}</td></tr>`
+    ? `<tr><td colspan="6" class="empty">${state.loading ? 'Loading...' : 'No patients found.'}</td></tr>`
     : state.patients.map(p => {
         const isActive = !p.date_of_discharge;
+        const mrdDisplay = p.mrd_number ? escapeHtml(p.mrd_number) : '—';
         return `
           <tr>
-            <td class="cell-name"><a class="row-link" href="#" onclick="event.preventDefault(); goPatient('${p.id}')">${escapeHtml(p.name)}</a></td>
+            <td class="cell-name">
+              <a class="row-link" href="#" onclick="event.preventDefault(); goPatient('${p.id}')">${escapeHtml(p.name)}</a>
+              <div class="cell-mrd-mobile mobile-only">MRD: ${mrdDisplay}</div>
+            </td>
+            <td class="muted desk-only cell-mrd">${mrdDisplay}</td>
             <td class="muted desk-only">${p.age}</td>
             <td class="muted desk-only">${escapeHtml(p.sex)}</td>
             <td class="muted desk-only">${fmtDate(p.date_of_admission)}</td>
@@ -1385,7 +1455,7 @@ function renderDashboard() {
         <div class="filter-row">
           <div class="search-wrap">
             ${icons.search}
-            <input id="search-input" placeholder="Search patients by name" value="${escapeHtml(state.searchQuery)}" />
+            <input id="search-input" placeholder="Search by name or MRD number" value="${escapeHtml(state.searchQuery)}" />
           </div>
           <div class="tabs">
             ${tabs.map(t => `
@@ -1398,7 +1468,7 @@ function renderDashboard() {
           <table>
             <thead>
               <tr>
-                <th>Name</th><th class="desk-only">Age</th><th class="desk-only">Sex</th><th class="desk-only">Admitted</th><th>Status</th>
+                <th>Name</th><th class="desk-only">MRD</th><th class="desk-only">Age</th><th class="desk-only">Sex</th><th class="desk-only">Admitted</th><th>Status</th>
               </tr>
             </thead>
             <tbody>${tableRows}</tbody>
@@ -1546,6 +1616,7 @@ function renderPatient() {
                   ${isActive ? 'Active' : 'Discharged'}
                 </span>
               </div>
+              ${p.mrd_number ? `<div class="patient-mrd">MRD: ${escapeHtml(p.mrd_number)}</div>` : ''}
               <div class="patient-meta">
                 <div class="meta-item"><div class="lbl-text">Age</div><div class="val">${p.age}</div></div>
                 <div class="meta-item"><div class="lbl-text">Sex</div><div class="val">${escapeHtml(p.sex)}</div></div>
