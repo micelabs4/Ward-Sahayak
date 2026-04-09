@@ -314,6 +314,57 @@
   .file-drop:hover { background: rgba(128,128,128,0.04); }
   .file-drop input { display: none; }
 
+  .file-preview {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .file-preview:empty { display: none; }
+  .file-preview-item {
+    position: relative;
+    aspect-ratio: 1;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: var(--bg);
+  }
+  .file-preview-item img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .file-preview-remove {
+    position: absolute;
+    top: 4px; right: 4px;
+    width: 22px; height: 22px;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.7);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    border: none;
+    transition: background 0.15s;
+  }
+  .file-preview-remove:hover { background: rgba(220, 38, 38, 0.95); }
+  .file-preview-remove svg { width: 12px; height: 12px; }
+  .file-preview-name {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    background: linear-gradient(to top, rgba(0,0,0,0.75), transparent);
+    color: white;
+    font-size: 9px;
+    padding: 10px 5px 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: none;
+  }
+
   /* Login */
   .login-page { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
   .login-card { width: 100%; max-width: 380px; padding: 32px; }
@@ -576,6 +627,66 @@ function toast(message, isError = false) {
 function isConfigured() {
   return SUPABASE_URL && SUPABASE_ANON_KEY &&
          !SUPABASE_URL.includes('YOUR_') && !SUPABASE_ANON_KEY.includes('YOUR_');
+}
+
+// ============================================================================
+// File picker with thumbnail preview + individual remove
+// ============================================================================
+// Usage:
+//   const picker = setupFilePicker({ inputId, labelId, previewId });
+//   const files = picker.getFiles();   // call when submitting
+//
+// The picker owns the files array internally. Users can add more files
+// (they accumulate), and remove individual items via the X on each thumbnail.
+function setupFilePicker({ inputId, labelId, previewId, emptyLabel = 'Choose images' }) {
+  const input = document.getElementById(inputId);
+  const labelEl = document.getElementById(labelId);
+  const previewEl = document.getElementById(previewId);
+  if (!input || !labelEl || !previewEl) {
+    console.error('setupFilePicker: missing element', { inputId, labelId, previewId });
+    return { getFiles: () => [] };
+  }
+
+  let files = [];
+
+  const renderPreview = () => {
+    previewEl.innerHTML = files.map((file, idx) => {
+      const url = URL.createObjectURL(file);
+      return `
+        <div class="file-preview-item" data-idx="${idx}">
+          <img src="${url}" alt="${escapeHtml(file.name)}" />
+          <button type="button" class="file-preview-remove" data-remove="${idx}" aria-label="Remove">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+          <div class="file-preview-name">${escapeHtml(file.name)}</div>
+        </div>
+      `;
+    }).join('');
+    labelEl.textContent = files.length > 0
+      ? `Add more (${files.length} selected)`
+      : emptyLabel;
+  };
+
+  // Delegate remove clicks on the preview container
+  previewEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-remove]');
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const idx = parseInt(btn.getAttribute('data-remove'), 10);
+    files.splice(idx, 1);
+    renderPreview();
+  });
+
+  input.addEventListener('change', (e) => {
+    const newFiles = Array.from(e.target.files || []);
+    files = files.concat(newFiles);
+    // Reset the input so the same file can be reselected later if removed
+    input.value = '';
+    renderPreview();
+  });
+
+  return { getFiles: () => files };
 }
 
 // ============================================================================
@@ -864,7 +975,7 @@ function openAddEntryModal() {
   now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
   const localISO = now.toISOString().slice(0, 16);
 
-  let selectedFiles = [];
+  let entryPicker;
 
   openModal('New Timeline Entry', `
     <form>
@@ -898,9 +1009,10 @@ function openAddEntryModal() {
         <label class="lbl">Images (optional)</label>
         <label class="file-drop">
           ${icons.upload}
-          <span id="file-label">Choose images</span>
-          <input name="files" type="file" accept="image/*" multiple />
+          <span id="entry-file-label">Choose images</span>
+          <input id="entry-file-input" type="file" accept="image/*" multiple />
         </label>
+        <div class="file-preview" id="entry-file-preview"></div>
       </div>
       <div class="error-msg"></div>
       <div class="form-actions">
@@ -915,17 +1027,13 @@ function openAddEntryModal() {
       : typeSelect;
     if (!entryType) throw new Error('Please select or enter an entry type');
     // Use the entry type as the image label so timeline images are tagged automatically
-    await createEntry(form, selectedFiles, entryType, entryType);
+    await createEntry(form, entryPicker.getFiles(), entryType, entryType);
   });
 
-  // Wire file input
-  const fileInput = document.querySelector('#modal-backdrop input[name="files"]');
-  const fileLabel = document.querySelector('#file-label');
-  fileInput.addEventListener('change', (e) => {
-    selectedFiles = Array.from(e.target.files || []);
-    fileLabel.textContent = selectedFiles.length > 0
-      ? `${selectedFiles.length} file(s) selected`
-      : 'Choose images';
+  entryPicker = setupFilePicker({
+    inputId: 'entry-file-input',
+    labelId: 'entry-file-label',
+    previewId: 'entry-file-preview'
   });
 
   // Wire entry-type select — show custom field when "Other..." is picked
@@ -949,8 +1057,7 @@ function openAddProcedureModal(kind) {
   const label = kind.toUpperCase();
   const title = `New ${label} Session`;
 
-  let beforeFiles = [];
-  let afterFiles = [];
+  let beforePicker, afterPicker;
 
   openModal(title, `
     <form>
@@ -966,6 +1073,7 @@ function openAddProcedureModal(kind) {
             <span id="before-label">Choose images</span>
             <input id="before-input" type="file" accept="image/*" multiple />
           </label>
+          <div class="file-preview" id="before-preview"></div>
         </div>
         <div class="form-row">
           <label class="lbl">After photos (optional)</label>
@@ -974,6 +1082,7 @@ function openAddProcedureModal(kind) {
             <span id="after-label">Choose images</span>
             <input id="after-input" type="file" accept="image/*" multiple />
           </label>
+          <div class="file-preview" id="after-preview"></div>
         </div>
       </div>
       <div class="error-msg"></div>
@@ -983,26 +1092,18 @@ function openAddProcedureModal(kind) {
       </div>
     </form>
   `, async (form) => {
-    await createProcedure(kind, form.date.value, beforeFiles, afterFiles);
+    await createProcedure(kind, form.date.value, beforePicker.getFiles(), afterPicker.getFiles());
   });
 
-  // Wire file inputs
-  const beforeInput = document.querySelector('#before-input');
-  const beforeLbl = document.querySelector('#before-label');
-  beforeInput.addEventListener('change', (e) => {
-    beforeFiles = Array.from(e.target.files || []);
-    beforeLbl.textContent = beforeFiles.length > 0
-      ? `${beforeFiles.length} file(s) selected`
-      : 'Choose images';
+  beforePicker = setupFilePicker({
+    inputId: 'before-input',
+    labelId: 'before-label',
+    previewId: 'before-preview'
   });
-
-  const afterInput = document.querySelector('#after-input');
-  const afterLbl = document.querySelector('#after-label');
-  afterInput.addEventListener('change', (e) => {
-    afterFiles = Array.from(e.target.files || []);
-    afterLbl.textContent = afterFiles.length > 0
-      ? `${afterFiles.length} file(s) selected`
-      : 'Choose images';
+  afterPicker = setupFilePicker({
+    inputId: 'after-input',
+    labelId: 'after-label',
+    previewId: 'after-preview'
   });
 }
 
@@ -1039,7 +1140,10 @@ async function handleLogin(form, mode) {
   if (mode === 'signup') {
     const name = form.name.value.trim();
     const houName = form.hou_name.value.trim();
+    const passwordConfirm = form.password_confirm.value;
     if (!name || !houName) throw new Error('Name and Head of Unit are required');
+    if (password !== passwordConfirm) throw new Error('Passwords do not match');
+    if (password.length < 6) throw new Error('Password must be at least 6 characters');
 
     // Pass name + hou_name in user metadata — the DB trigger will create a profile row
     const { error: signUpErr } = await db.auth.signUp({
@@ -1126,6 +1230,12 @@ function renderLogin() {
             <label class="lbl">Password</label>
             <input name="password" type="password" required minlength="6" autocomplete="${isSignup ? 'new-password' : 'current-password'}" />
           </div>
+          ${isSignup ? `
+            <div class="form-row">
+              <label class="lbl">Confirm password</label>
+              <input name="password_confirm" type="password" required minlength="6" autocomplete="new-password" />
+            </div>
+          ` : ''}
           <div class="error-msg"></div>
           <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center; margin-top:6px;">
             ${isSignup ? 'Create account' : 'Sign in'}
