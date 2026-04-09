@@ -230,6 +230,38 @@
   .timeline-date { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .timeline-notes { font-size: 13px; margin-top: 6px; white-space: pre-wrap; line-height: 1.5; }
 
+  .tl-tag {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    padding: 2px 7px;
+    border-radius: 5px;
+    margin-right: 6px;
+    vertical-align: middle;
+    text-transform: uppercase;
+  }
+  .tl-tag-hbot { background: rgba(37, 99, 235, 0.12); color: #1d4ed8; }
+  html.dark .tl-tag-hbot { background: rgba(59, 130, 246, 0.18); color: #60a5fa; }
+  .tl-tag-npwt { background: rgba(168, 85, 247, 0.12); color: #7c3aed; }
+  html.dark .tl-tag-npwt { background: rgba(168, 85, 247, 0.2); color: #c084fc; }
+  .tl-sub { color: var(--muted); font-weight: 400; font-size: 12px; margin-left: 4px; }
+  .tl-dot-hbot { background: #2563eb !important; }
+  .tl-dot-npwt { background: #a855f7 !important; }
+
+  .gallery-item { position: relative; }
+  .gallery-label {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    background: linear-gradient(to top, rgba(0,0,0,0.7), transparent);
+    color: white;
+    font-size: 10px;
+    padding: 12px 6px 5px;
+    text-align: left;
+    pointer-events: none;
+    font-weight: 500;
+  }
+
   .timeline-toggle {
     display: none;
     align-items: center;
@@ -654,51 +686,83 @@ async function createPatient(form) {
   await loadPatient(data.id);
 }
 
-async function createEntry(form, files, imageLabel) {
-  const { data: entry, error: entryErr } = await db.from('patient_entries').insert({
-    patient_id: state.patientId,
-    operator: form.operator.value,
-    notes: form.notes.value,
-    date: new Date(form.date.value).toISOString()
-  }).select('id').single();
-
-  if (entryErr) throw entryErr;
-
-  // Upload each file to Storage, then save URL to images table
+async function uploadImages(files, { patientId, entryId = null, hbotId = null, npwtId = null, label = '' }) {
   for (const file of files) {
     const ext = file.name.split('.').pop() || 'jpg';
-    const path = `${state.patientId}/${entry.id}/${crypto.randomUUID()}.${ext}`;
+    const scope = entryId || hbotId || npwtId || 'loose';
+    const path = `${patientId}/${scope}/${crypto.randomUUID()}.${ext}`;
 
     const { error: upErr } = await db.storage
       .from('patient-images')
       .upload(path, file, { cacheControl: '3600', upsert: false });
-
     if (upErr) throw new Error('Image upload failed: ' + upErr.message);
 
     const { data: pub } = db.storage.from('patient-images').getPublicUrl(path);
 
-    const { error: imgErr } = await db.from('images').insert({
-      patient_id: state.patientId,
-      entry_id: entry.id,
+    const row = {
+      patient_id: patientId,
       image_url: pub.publicUrl,
-      label: imageLabel || ''
-    });
+      label: label || ''
+    };
+    if (entryId) row.entry_id = entryId;
+    if (hbotId) row.hbot_session_id = hbotId;
+    if (npwtId) row.npwt_session_id = npwtId;
+
+    const { error: imgErr } = await db.from('images').insert(row);
     if (imgErr) throw imgErr;
   }
+}
+
+async function createEntry(form, files, imageLabel, entryType) {
+  const { data: entry, error: entryErr } = await db.from('patient_entries').insert({
+    patient_id: state.patientId,
+    operator: form.operator.value,
+    notes: form.notes.value,
+    date: new Date(form.date.value).toISOString(),
+    entry_type: entryType || null
+  }).select('id').single();
+
+  if (entryErr) throw entryErr;
+
+  await uploadImages(files, {
+    patientId: state.patientId,
+    entryId: entry.id,
+    label: imageLabel
+  });
 
   toast('Entry saved');
   closeModal();
   await loadPatient(state.patientId);
 }
 
-async function createProcedure(kind, date) {
+async function createProcedure(kind, date, beforeFiles, afterFiles) {
   const table = kind === 'hbot' ? 'hbot_sessions' : 'npwt_sessions';
-  const { error } = await db.from(table).insert({
+  const { data: session, error } = await db.from(table).insert({
     patient_id: state.patientId,
     date: date
-  });
+  }).select('id').single();
+
   if (error) throw error;
-  toast(`${kind.toUpperCase()} session added`);
+
+  const sessionKey = kind === 'hbot' ? 'hbotId' : 'npwtId';
+  const procLabel = kind.toUpperCase();
+
+  if (beforeFiles && beforeFiles.length) {
+    await uploadImages(beforeFiles, {
+      patientId: state.patientId,
+      [sessionKey]: session.id,
+      label: `Before ${procLabel}`
+    });
+  }
+  if (afterFiles && afterFiles.length) {
+    await uploadImages(afterFiles, {
+      patientId: state.patientId,
+      [sessionKey]: session.id,
+      label: `After ${procLabel}`
+    });
+  }
+
+  toast(`${procLabel} session added`);
   closeModal();
   await loadPatient(state.patientId);
 }
@@ -804,6 +868,18 @@ function openAddEntryModal() {
 
   openModal('New Timeline Entry', `
     <form>
+      <div class="form-row">
+        <label class="lbl">Entry type</label>
+        <select name="entryTypeSelect" id="entry-type-select" required>
+          <option value="">— Select type —</option>
+          <option value="Ward round / Follow-up">Ward round / Follow-up</option>
+          <option value="Culture / swab taken">Culture / swab taken</option>
+          <option value="Antibiotic started or changed">Antibiotic started or changed</option>
+          <option value="Pus culture and sensitivity">Pus culture and sensitivity</option>
+          <option value="__other__">Other...</option>
+        </select>
+        <input name="entryTypeCustom" id="entry-type-custom" placeholder="Describe the entry type" style="display:none; margin-top:8px;" />
+      </div>
       <div class="form-grid">
         <div class="form-row">
           <label class="lbl">Date</label>
@@ -816,22 +892,10 @@ function openAddEntryModal() {
       </div>
       <div class="form-row">
         <label class="lbl">Notes</label>
-        <textarea name="notes" required rows="4" placeholder="Clinical observations, dressing change, findings..."></textarea>
+        <textarea name="notes" required rows="4" placeholder="Clinical observations, findings, actions taken..."></textarea>
       </div>
       <div class="form-row">
-        <label class="lbl">Image label</label>
-        <select name="imageLabelSelect" id="image-label-select">
-          <option value="">— None —</option>
-          <option value="Before HBOT">Before HBOT</option>
-          <option value="After HBOT">After HBOT</option>
-          <option value="Before NPWT">Before NPWT</option>
-          <option value="After NPWT">After NPWT</option>
-          <option value="__other__">Other...</option>
-        </select>
-        <input name="imageLabelCustom" id="image-label-custom" placeholder="Enter custom label" style="display:none; margin-top:8px;" />
-      </div>
-      <div class="form-row">
-        <label class="lbl">Images</label>
+        <label class="lbl">Images (optional)</label>
         <label class="file-drop">
           ${icons.upload}
           <span id="file-label">Choose images</span>
@@ -845,11 +909,13 @@ function openAddEntryModal() {
       </div>
     </form>
   `, async (form) => {
-    const selectVal = form.imageLabelSelect.value;
-    const finalLabel = selectVal === '__other__'
-      ? form.imageLabelCustom.value.trim()
-      : selectVal;
-    await createEntry(form, selectedFiles, finalLabel);
+    const typeSelect = form.entryTypeSelect.value;
+    const entryType = typeSelect === '__other__'
+      ? form.entryTypeCustom.value.trim()
+      : typeSelect;
+    if (!entryType) throw new Error('Please select or enter an entry type');
+    // Use the entry type as the image label so timeline images are tagged automatically
+    await createEntry(form, selectedFiles, entryType, entryType);
   });
 
   // Wire file input
@@ -862,28 +928,53 @@ function openAddEntryModal() {
       : 'Choose images';
   });
 
-  // Wire image-label select — show custom text input when "Other..." is picked
-  const labelSelect = document.querySelector('#image-label-select');
-  const labelCustom = document.querySelector('#image-label-custom');
-  labelSelect.addEventListener('change', (e) => {
+  // Wire entry-type select — show custom field when "Other..." is picked
+  const typeSelect = document.querySelector('#entry-type-select');
+  const typeCustom = document.querySelector('#entry-type-custom');
+  typeSelect.addEventListener('change', (e) => {
     if (e.target.value === '__other__') {
-      labelCustom.style.display = 'block';
-      labelCustom.focus();
+      typeCustom.style.display = 'block';
+      typeCustom.required = true;
+      typeCustom.focus();
     } else {
-      labelCustom.style.display = 'none';
-      labelCustom.value = '';
+      typeCustom.style.display = 'none';
+      typeCustom.required = false;
+      typeCustom.value = '';
     }
   });
 }
 
 function openAddProcedureModal(kind) {
   const today = new Date().toISOString().slice(0, 10);
-  const title = kind === 'hbot' ? 'New HBOT Session' : 'New NPWT Session';
+  const label = kind.toUpperCase();
+  const title = `New ${label} Session`;
+
+  let beforeFiles = [];
+  let afterFiles = [];
+
   openModal(title, `
     <form>
       <div class="form-row">
         <label class="lbl">Session date</label>
         <input name="date" type="date" required value="${today}" />
+      </div>
+      <div class="form-grid">
+        <div class="form-row">
+          <label class="lbl">Before photos (optional)</label>
+          <label class="file-drop">
+            ${icons.upload}
+            <span id="before-label">Choose images</span>
+            <input id="before-input" type="file" accept="image/*" multiple />
+          </label>
+        </div>
+        <div class="form-row">
+          <label class="lbl">After photos (optional)</label>
+          <label class="file-drop">
+            ${icons.upload}
+            <span id="after-label">Choose images</span>
+            <input id="after-input" type="file" accept="image/*" multiple />
+          </label>
+        </div>
       </div>
       <div class="error-msg"></div>
       <div class="form-actions">
@@ -892,7 +983,26 @@ function openAddProcedureModal(kind) {
       </div>
     </form>
   `, async (form) => {
-    await createProcedure(kind, form.date.value);
+    await createProcedure(kind, form.date.value, beforeFiles, afterFiles);
+  });
+
+  // Wire file inputs
+  const beforeInput = document.querySelector('#before-input');
+  const beforeLbl = document.querySelector('#before-label');
+  beforeInput.addEventListener('change', (e) => {
+    beforeFiles = Array.from(e.target.files || []);
+    beforeLbl.textContent = beforeFiles.length > 0
+      ? `${beforeFiles.length} file(s) selected`
+      : 'Choose images';
+  });
+
+  const afterInput = document.querySelector('#after-input');
+  const afterLbl = document.querySelector('#after-label');
+  afterInput.addEventListener('change', (e) => {
+    afterFiles = Array.from(e.target.files || []);
+    afterLbl.textContent = afterFiles.length > 0
+      ? `${afterFiles.length} file(s) selected`
+      : 'Choose images';
   });
 }
 
@@ -1197,35 +1307,88 @@ function renderPatient() {
   const p = state.patient;
   const isActive = !p.date_of_discharge;
 
-  // Group images by entry
+  // Group images by their parent record (entry / hbot / npwt)
   const imagesByEntry = {};
+  const imagesByHbot = {};
+  const imagesByNpwt = {};
   for (const img of state.images) {
-    if (!img.entry_id) continue;
-    (imagesByEntry[img.entry_id] = imagesByEntry[img.entry_id] || []).push(img);
+    if (img.entry_id) {
+      (imagesByEntry[img.entry_id] = imagesByEntry[img.entry_id] || []).push(img);
+    } else if (img.hbot_session_id) {
+      (imagesByHbot[img.hbot_session_id] = imagesByHbot[img.hbot_session_id] || []).push(img);
+    } else if (img.npwt_session_id) {
+      (imagesByNpwt[img.npwt_session_id] = imagesByNpwt[img.npwt_session_id] || []).push(img);
+    }
   }
 
-  const visibleCount = 2;
-  const hiddenCount = Math.max(0, state.entries.length - visibleCount);
+  // Build a unified timeline: entries + hbot sessions + npwt sessions, sorted by date desc
+  const items = [];
+  for (const e of state.entries) {
+    items.push({
+      kind: 'entry',
+      id: e.id,
+      date: e.date,
+      title: e.entry_type || 'Entry',
+      operator: e.operator,
+      notes: e.notes,
+      images: imagesByEntry[e.id] || [],
+      tag: null
+    });
+  }
+  for (const h of state.hbot) {
+    items.push({
+      kind: 'hbot',
+      id: h.id,
+      date: h.date,
+      title: 'HBOT Session',
+      operator: null,
+      notes: '',
+      images: imagesByHbot[h.id] || [],
+      tag: 'HBOT'
+    });
+  }
+  for (const n of state.npwt) {
+    items.push({
+      kind: 'npwt',
+      id: n.id,
+      date: n.date,
+      title: 'NPWT Session',
+      operator: null,
+      notes: '',
+      images: imagesByNpwt[n.id] || [],
+      tag: 'NPWT'
+    });
+  }
+  items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-  const timelineHtml = state.entries.length === 0
-    ? '<div class="muted" style="font-size:13px;">No entries yet. Add the first timeline entry to get started.</div>'
+  const visibleCount = 2;
+  const hiddenCount = Math.max(0, items.length - visibleCount);
+
+  const timelineHtml = items.length === 0
+    ? '<div class="muted" style="font-size:13px;">No timeline items yet. Add an entry or procedure session to get started.</div>'
     : `<ol class="timeline" id="timeline-list" style="list-style:none; padding-left:20px; margin:0;">
-        ${state.entries.map((e, idx) => {
-          const entryImgs = imagesByEntry[e.id] || [];
+        ${items.map((it, idx) => {
           const hiddenClass = idx >= visibleCount ? 'tl-hidden-mobile' : '';
+          const dotClass = it.kind === 'hbot' ? 'tl-dot-hbot' : it.kind === 'npwt' ? 'tl-dot-npwt' : '';
+          const tagHtml = it.tag ? `<span class="tl-tag tl-tag-${it.kind}">${it.tag}</span>` : '';
           return `
             <li class="timeline-item ${hiddenClass}">
-              <span class="timeline-dot"></span>
+              <span class="timeline-dot ${dotClass}"></span>
               <div class="timeline-header">
-                <div class="timeline-op">${escapeHtml(e.operator)}</div>
-                <div class="timeline-date">${fmtDateTime(e.date)}</div>
+                <div class="timeline-op">
+                  ${tagHtml}
+                  ${escapeHtml(it.title)}
+                  ${it.operator ? `<span class="tl-sub">· ${escapeHtml(it.operator)}</span>` : ''}
+                </div>
+                <div class="timeline-date">${it.kind === 'entry' ? fmtDateTime(it.date) : fmtDate(it.date)}</div>
               </div>
-              <p class="timeline-notes">${escapeHtml(e.notes)}</p>
-              ${entryImgs.length > 0 ? `
+              ${it.notes ? `<p class="timeline-notes">${escapeHtml(it.notes)}</p>` : ''}
+              ${it.images.length > 0 ? `
                 <div class="gallery">
-                  ${entryImgs.map(img => `
+                  ${it.images.map(img => `
                     <button class="gallery-item" onclick="openLightbox('${escapeHtml(img.image_url)}', '${escapeHtml(img.label)}')">
                       <img src="${escapeHtml(img.image_url)}" alt="${escapeHtml(img.label)}" />
+                      ${img.label ? `<span class="gallery-label">${escapeHtml(img.label)}</span>` : ''}
                     </button>
                   `).join('')}
                 </div>
@@ -1236,7 +1399,7 @@ function renderPatient() {
       </ol>
       ${hiddenCount > 0 ? `
         <button id="timeline-toggle" class="timeline-toggle mobile-only" onclick="toggleTimeline()">
-          <span class="tl-toggle-show">Show ${hiddenCount} more ${hiddenCount === 1 ? 'entry' : 'entries'}</span>
+          <span class="tl-toggle-show">Show ${hiddenCount} more ${hiddenCount === 1 ? 'item' : 'items'}</span>
           <span class="tl-toggle-hide">Show less</span>
           <svg class="tl-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
         </button>
