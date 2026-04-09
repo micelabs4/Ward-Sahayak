@@ -156,10 +156,23 @@
     display: inline-flex; align-items: center; gap: 6px;
     font-size: 11px; padding: 3px 10px; border-radius: 999px;
     border: 1px solid var(--border);
+    background: rgba(128,128,128,0.06);
+    color: var(--muted);
+    font-weight: 500;
   }
-  .badge-active { border-color: var(--fg); }
+  .badge-active {
+    border-color: rgba(22, 163, 74, 0.35);
+    background: rgba(22, 163, 74, 0.1);
+    color: #15803d;
+  }
+  html.dark .badge-active {
+    border-color: rgba(74, 222, 128, 0.35);
+    background: rgba(22, 163, 74, 0.15);
+    color: #4ade80;
+  }
   .badge .dot { width: 6px; height: 6px; border-radius: 999px; background: var(--muted); }
-  .badge-active .dot { background: var(--fg); }
+  .badge-active .dot { background: #16a34a; }
+  html.dark .badge-active .dot { background: #4ade80; }
 
   .empty { padding: 48px 20px; text-align: center; color: var(--muted); font-size: 13px; }
 
@@ -216,6 +229,29 @@
   .timeline-op { font-size: 13px; font-weight: 500; }
   .timeline-date { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .timeline-notes { font-size: 13px; margin-top: 6px; white-space: pre-wrap; line-height: 1.5; }
+
+  .timeline-toggle {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: 100%;
+    margin-top: 14px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 500;
+    transition: all 0.15s;
+  }
+  .timeline-toggle:hover { background: rgba(128,128,128,0.06); color: var(--fg); }
+  .timeline-toggle .tl-toggle-hide { display: none; }
+  .timeline-toggle.tl-expanded .tl-toggle-show { display: none; }
+  .timeline-toggle.tl-expanded .tl-toggle-hide { display: inline; }
+  .timeline-toggle.tl-expanded .tl-chevron { transform: rotate(180deg); }
+  .tl-chevron { transition: transform 0.2s; }
 
   /* Image gallery */
   .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; margin-top: 12px; }
@@ -410,6 +446,11 @@
     .timeline { padding-left: 16px; }
     .timeline-dot { left: -22px; }
 
+    /* Collapsed timeline: hide entries beyond the first 2 until expanded */
+    .tl-hidden-mobile { display: none; }
+    .timeline.tl-expanded .tl-hidden-mobile { display: block; }
+    .timeline-toggle { display: flex; }
+
     /* Modal: full width, less padding */
     .modal { padding: 22px 18px; max-height: 92vh; }
     .modal-title { font-size: 16px; }
@@ -520,6 +561,14 @@ function toggleTheme() {
   const isDark = document.documentElement.classList.toggle('dark');
   try { localStorage.setItem('theme', isDark ? 'dark' : 'light'); } catch (e) {}
   render();
+}
+
+function toggleTimeline() {
+  const list = document.getElementById('timeline-list');
+  const btn = document.getElementById('timeline-toggle');
+  if (!list || !btn) return;
+  list.classList.toggle('tl-expanded');
+  btn.classList.toggle('tl-expanded');
 }
 
 // ============================================================================
@@ -770,8 +819,16 @@ function openAddEntryModal() {
         <textarea name="notes" required rows="4" placeholder="Clinical observations, dressing change, findings..."></textarea>
       </div>
       <div class="form-row">
-        <label class="lbl">Image label (optional)</label>
-        <input name="imageLabel" placeholder="e.g. Before HBOT" />
+        <label class="lbl">Image label</label>
+        <select name="imageLabelSelect" id="image-label-select">
+          <option value="">— None —</option>
+          <option value="Before HBOT">Before HBOT</option>
+          <option value="After HBOT">After HBOT</option>
+          <option value="Before NPWT">Before NPWT</option>
+          <option value="After NPWT">After NPWT</option>
+          <option value="__other__">Other...</option>
+        </select>
+        <input name="imageLabelCustom" id="image-label-custom" placeholder="Enter custom label" style="display:none; margin-top:8px;" />
       </div>
       <div class="form-row">
         <label class="lbl">Images</label>
@@ -788,7 +845,11 @@ function openAddEntryModal() {
       </div>
     </form>
   `, async (form) => {
-    await createEntry(form, selectedFiles, form.imageLabel.value);
+    const selectVal = form.imageLabelSelect.value;
+    const finalLabel = selectVal === '__other__'
+      ? form.imageLabelCustom.value.trim()
+      : selectVal;
+    await createEntry(form, selectedFiles, finalLabel);
   });
 
   // Wire file input
@@ -799,6 +860,19 @@ function openAddEntryModal() {
     fileLabel.textContent = selectedFiles.length > 0
       ? `${selectedFiles.length} file(s) selected`
       : 'Choose images';
+  });
+
+  // Wire image-label select — show custom text input when "Other..." is picked
+  const labelSelect = document.querySelector('#image-label-select');
+  const labelCustom = document.querySelector('#image-label-custom');
+  labelSelect.addEventListener('change', (e) => {
+    if (e.target.value === '__other__') {
+      labelCustom.style.display = 'block';
+      labelCustom.focus();
+    } else {
+      labelCustom.style.display = 'none';
+      labelCustom.value = '';
+    }
   });
 }
 
@@ -1130,13 +1204,17 @@ function renderPatient() {
     (imagesByEntry[img.entry_id] = imagesByEntry[img.entry_id] || []).push(img);
   }
 
+  const visibleCount = 2;
+  const hiddenCount = Math.max(0, state.entries.length - visibleCount);
+
   const timelineHtml = state.entries.length === 0
     ? '<div class="muted" style="font-size:13px;">No entries yet. Add the first timeline entry to get started.</div>'
-    : `<ol class="timeline" style="list-style:none; padding-left:20px; margin:0;">
-        ${state.entries.map(e => {
+    : `<ol class="timeline" id="timeline-list" style="list-style:none; padding-left:20px; margin:0;">
+        ${state.entries.map((e, idx) => {
           const entryImgs = imagesByEntry[e.id] || [];
+          const hiddenClass = idx >= visibleCount ? 'tl-hidden-mobile' : '';
           return `
-            <li class="timeline-item">
+            <li class="timeline-item ${hiddenClass}">
               <span class="timeline-dot"></span>
               <div class="timeline-header">
                 <div class="timeline-op">${escapeHtml(e.operator)}</div>
@@ -1155,7 +1233,14 @@ function renderPatient() {
             </li>
           `;
         }).join('')}
-      </ol>`;
+      </ol>
+      ${hiddenCount > 0 ? `
+        <button id="timeline-toggle" class="timeline-toggle mobile-only" onclick="toggleTimeline()">
+          <span class="tl-toggle-show">Show ${hiddenCount} more ${hiddenCount === 1 ? 'entry' : 'entries'}</span>
+          <span class="tl-toggle-hide">Show less</span>
+          <svg class="tl-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+      ` : ''}`;
 
   const allImagesHtml = state.images.length === 0 ? '' : `
     <div class="card section">
