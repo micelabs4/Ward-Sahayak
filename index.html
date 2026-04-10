@@ -882,7 +882,8 @@ async function createEntry(form, files, imageLabel, entryType) {
     operator: form.operator.value,
     notes: form.notes.value,
     date: new Date(form.date.value).toISOString(),
-    entry_type: entryType || null
+    entry_type: entryType || null,
+    assessment_data: form.__assessmentData || null
   }).select('id').single();
 
   if (entryErr) throw entryErr;
@@ -1035,6 +1036,22 @@ function openNewPatientModal() {
   }
 }
 
+function openInfoModal() {
+  const sec = (t, rows) => `<div style="margin-top:14px;"><div style="font-weight:600; font-size:13px; margin-bottom:6px;">${t}</div>${rows.map(r=>`<div style="font-size:13px; padding:4px 0; border-bottom:1px dashed var(--border);"><strong>${r[0]}:</strong> ${r[1]}</div>`).join('')}</div>`;
+  openModal('Coloplast Wound Care Reference', `
+    <div style="max-height:60vh; overflow-y:auto; font-size:13px; line-height:1.55;">
+      <p style="color:var(--muted); margin:0;">Quick reference adapted from the Foot Care Clinic / Coloplast Academy worksheet.</p>
+      ${sec('Wound bed — management goals', [['Goals','Remove non-viable tissue · protect granulation/epithelial tissue · rehydrate wound bed · manage exudate · manage bacterial burden']])}
+      ${sec('Treatment by exudate level', [['Low','Hydrocolloid'],['Medium / High','Foam dressing']])}
+      ${sec('Tissue-specific', [['Necrotic / Sloughy','Debridement'],['Signs of infection','Antimicrobial'],['Dry wound bed','Hydrogel'],['Granulating / epithelialising','Protect — non-adherent dressing']])}
+      ${sec('Periwound skin', [['Maceration / excoriation','Barrier cream or film'],['Callus / hyperkeratosis','Debridement'],['Dry skin / eczema','Emollient']])}
+      ${sec('Wound edge', [['Protection','Hydrocolloid'],['Rolled edges','Debridement'],['Dehydration','Hydrogel + hydrocolloid']])}
+    </div>
+    <div class="form-actions"><button type="button" class="btn btn-primary" onclick="closeModal()">Close</button></div>
+  `);
+}
+window.openInfoModal = openInfoModal;
+
 function openAddEntryModal() {
   const now = new Date();
   now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
@@ -1048,6 +1065,7 @@ function openAddEntryModal() {
         <label class="lbl">Entry type</label>
         <select name="entryTypeSelect" id="entry-type-select" required>
           <option value="">— Select type —</option>
+          ${(() => { const ex = (state.entries||[]).find(e => e.entry_type === 'Initial Foot Assessment'); return ex ? `<option value="Initial Foot Assessment" disabled>Initial Foot Assessment — completed ${fmtDate(ex.date)}</option>` : `<option value="Initial Foot Assessment">Initial Foot Assessment</option>`; })()}
           <option value="Ward round / Follow-up">Ward round / Follow-up</option>
           <option value="Culture / swab taken">Culture / swab taken</option>
           <option value="Antibiotic started or changed">Antibiotic started or changed</option>
@@ -1065,6 +1083,20 @@ function openAddEntryModal() {
           <label class="lbl">Operator</label>
           <input name="operator" required placeholder="Dr. Smith" value="${escapeHtml(currentProfile?.name || '')}" />
         </div>
+      </div>
+      <div class="form-row" id="assessment-subform" style="display:none; border:1px solid var(--border); border-radius:8px; padding:12px; background:rgba(128,128,128,0.04);">
+        <div style="font-weight:600; font-size:13px; margin-bottom:10px;">Initial Foot Assessment</div>
+        <div style="font-size:12px; font-weight:600; margin-bottom:6px;">Wound bed — tissue type</div>
+        <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:10px; font-size:13px;">${['necrotic','sloughy','granulating','epithelialising'].map(v=>`<label><input type="checkbox" name="wb_tissue" value="${v}"> ${v}</label>`).join('')}</div>
+        <div style="font-size:12px; font-weight:600; margin-bottom:6px;">Wound bed — exudate</div>
+        <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:10px; font-size:13px;">${['dry','low','medium','high'].map(v=>`<label><input type="radio" name="wb_exudate" value="${v}"> ${v}</label>`).join('')}</div>
+        <div style="margin-bottom:10px; font-size:13px;"><label><input type="checkbox" name="wb_infection"> Signs of infection</label></div>
+        <div style="font-size:12px; font-weight:600; margin-bottom:6px;">Periwound skin</div>
+        <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:10px; font-size:13px;">${['maceration','excoriation','eczema','hyperkeratosis','callus','dry skin'].map(v=>`<label><input type="checkbox" name="pw" value="${v}"> ${v}</label>`).join('')}</div>
+        <div style="font-size:12px; font-weight:600; margin-bottom:6px;">Wound edge</div>
+        <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:10px; font-size:13px;">${['maceration','undermining','rolled edges','dehydration'].map(v=>`<label><input type="checkbox" name="we" value="${v}"> ${v}</label>`).join('')}</div>
+        <label class="lbl" style="font-size:12px;">Treatment plan</label>
+        <textarea name="treatment_plan" rows="3" placeholder="Dressing choice, debridement plan, offloading, follow-up..."></textarea>
       </div>
       <div class="form-row">
         <label class="lbl">Notes</label>
@@ -1091,9 +1123,30 @@ function openAddEntryModal() {
       ? form.entryTypeCustom.value.trim()
       : typeSelect;
     if (!entryType) throw new Error('Please select or enter an entry type');
+    if (entryType === 'Initial Foot Assessment') {
+      const gv = n => Array.from(form.querySelectorAll(`input[name="${n}"]:checked`)).map(el=>el.value);
+      form.__assessmentData = {
+        wound_bed: { tissue: gv('wb_tissue'), exudate: (form.querySelector('input[name="wb_exudate"]:checked')||{}).value||null, infection: form.querySelector('input[name="wb_infection"]').checked },
+        periwound: gv('pw'),
+        wound_edge: gv('we'),
+        treatment_plan: form.treatment_plan.value.trim()
+      };
+    }
     // Use the entry type as the image label so timeline images are tagged automatically
     await createEntry(form, entryPicker.getFiles(), entryType, entryType);
   });
+
+  // Toggle assessment subform visibility
+  setTimeout(() => {
+    const sel = document.querySelector('#entry-type-select');
+    const sub = document.querySelector('#assessment-subform');
+    const notesEl = document.querySelector('textarea[name="notes"]');
+    sel?.addEventListener('change', () => {
+      const isIFA = sel.value === 'Initial Foot Assessment';
+      if (sub) sub.style.display = isIFA ? 'block' : 'none';
+      if (notesEl) notesEl.required = !isIFA;
+    });
+  }, 0);
 
   entryPicker = setupFilePicker({
     inputId: 'entry-file-input',
@@ -1340,6 +1393,9 @@ function renderSidebar() {
             <div class="profile-hou">HOU: ${escapeHtml(currentProfile.hou_name)}</div>
           </div>
         ` : currentUser ? `<div class="email">${escapeHtml(currentUser.email)}</div>` : ''}
+        <button class="nav-item" onclick="openInfoModal()">
+          <span style="display:inline-flex; width:16px; height:16px; align-items:center; justify-content:center; border:1.5px solid currentColor; border-radius:999px; font-size:11px; font-weight:700; font-style:italic; font-family:serif;">i</span><span>Reference</span>
+        </button>
         <button class="nav-item" onclick="signOut()">
           ${icons.logout}<span>Sign out</span>
         </button>
@@ -1357,6 +1413,10 @@ function renderBottomNav() {
       <button class="bnav-item ${state.route === 'dashboard' ? 'active' : ''}" onclick="goDashboard()">
         ${icons.home}
         <span>Home</span>
+      </button>
+      <button class="bnav-item" onclick="openInfoModal()">
+        <span style="display:inline-flex; width:20px; height:20px; align-items:center; justify-content:center; border:1.5px solid currentColor; border-radius:999px; font-size:13px; font-weight:700; font-style:italic; font-family:serif;">i</span>
+        <span>Info</span>
       </button>
       <button class="bnav-item" onclick="state.filter='all'; goDashboard();">
         ${icons.users}
@@ -1512,6 +1572,7 @@ function renderPatient() {
       operator: e.operator,
       notes: e.notes,
       images: imagesByEntry[e.id] || [],
+      assessment: e.assessment_data || null,
       tag: null
     });
   }
@@ -1562,7 +1623,21 @@ function renderPatient() {
                 </div>
                 <div class="timeline-date">${it.kind === 'entry' ? fmtDateTime(it.date) : fmtDate(it.date)}</div>
               </div>
-              ${it.notes ? `<p class="timeline-notes">${escapeHtml(it.notes)}</p>` : ''}
+              ${it.assessment ? (() => {
+                const a = it.assessment;
+                const pill = v => `<span style="display:inline-block; padding:2px 8px; margin:2px 4px 2px 0; font-size:11px; border-radius:999px; background:rgba(16,185,129,0.12); color:var(--fg); border:1px solid rgba(16,185,129,0.3);">${escapeHtml(v)}</span>`;
+                const section = (label, vals) => vals && vals.length ? `<div style="margin-top:6px;"><span style="font-size:11px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:0.04em;">${label}</span><div style="margin-top:2px;">${vals.map(pill).join('')}</div></div>` : '';
+                const wb = a.wound_bed || {};
+                const wbVals = [...(wb.tissue||[])];
+                if (wb.exudate) wbVals.push('exudate: ' + wb.exudate);
+                if (wb.infection) wbVals.push('signs of infection');
+                return `<div style="margin-top:8px; padding:10px 12px; border:1px solid var(--border); border-radius:8px; background:rgba(128,128,128,0.04);">
+                  ${section('Wound bed', wbVals)}
+                  ${section('Periwound', a.periwound)}
+                  ${section('Wound edge', a.wound_edge)}
+                  ${a.treatment_plan ? `<div style="margin-top:8px; padding-top:8px; border-top:1px dashed var(--border);"><span style="font-size:11px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:0.04em;">Treatment plan</span><p style="font-size:13px; margin:2px 0 0; white-space:pre-wrap; line-height:1.5;">${escapeHtml(a.treatment_plan)}</p></div>` : ''}
+                </div>`;
+              })() : (it.notes ? `<p class="timeline-notes">${escapeHtml(it.notes)}</p>` : '')}
               ${it.images.length > 0 ? `
                 <div class="gallery">
                   ${it.images.map(img => `
