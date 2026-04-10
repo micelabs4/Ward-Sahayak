@@ -1065,7 +1065,7 @@ function openAddEntryModal() {
         <label class="lbl">Entry type</label>
         <select name="entryTypeSelect" id="entry-type-select" required>
           <option value="">— Select type —</option>
-          ${(() => { const ex = (state.entries||[]).find(e => e.entry_type === 'Initial Foot Assessment'); return ex ? `<option value="Initial Foot Assessment" disabled>Initial Foot Assessment — completed ${fmtDate(ex.date)}</option>` : `<option value="Initial Foot Assessment">Initial Foot Assessment</option>`; })()}
+          <option value="Weekly Foot Assessment">Weekly Foot Assessment</option>
           <option value="Ward round / Follow-up">Ward round / Follow-up</option>
           <option value="Culture / swab taken">Culture / swab taken</option>
           <option value="Antibiotic started or changed">Antibiotic started or changed</option>
@@ -1085,18 +1085,58 @@ function openAddEntryModal() {
         </div>
       </div>
       <div class="form-row" id="assessment-subform" style="display:none; border:1px solid var(--border); border-radius:8px; padding:12px; background:rgba(128,128,128,0.04);">
-        <div style="font-weight:600; font-size:13px; margin-bottom:10px;">Initial Foot Assessment</div>
-        <div style="font-size:12px; font-weight:600; margin-bottom:6px;">Wound bed — tissue type</div>
-        <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:10px; font-size:13px;">${['necrotic','sloughy','granulating','epithelialising'].map(v=>`<label><input type="checkbox" name="wb_tissue" value="${v}"> ${v}</label>`).join('')}</div>
-        <div style="font-size:12px; font-weight:600; margin-bottom:6px;">Wound bed — exudate</div>
-        <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:10px; font-size:13px;">${['dry','low','medium','high'].map(v=>`<label><input type="radio" name="wb_exudate" value="${v}"> ${v}</label>`).join('')}</div>
-        <div style="margin-bottom:10px; font-size:13px;"><label><input type="checkbox" name="wb_infection"> Signs of infection</label></div>
-        <div style="font-size:12px; font-weight:600; margin-bottom:6px;">Periwound skin</div>
-        <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:10px; font-size:13px;">${['maceration','excoriation','eczema','hyperkeratosis','callus','dry skin'].map(v=>`<label><input type="checkbox" name="pw" value="${v}"> ${v}</label>`).join('')}</div>
-        <div style="font-size:12px; font-weight:600; margin-bottom:6px;">Wound edge</div>
-        <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:10px; font-size:13px;">${['maceration','undermining','rolled edges','dehydration'].map(v=>`<label><input type="checkbox" name="we" value="${v}"> ${v}</label>`).join('')}</div>
-        <label class="lbl" style="font-size:12px;">Treatment plan</label>
-        <textarea name="treatment_plan" rows="3" placeholder="Dressing choice, debridement plan, offloading, follow-up..."></textarea>
+        <div style="font-weight:600; font-size:14px; margin-bottom:12px; color:var(--accent, #0891b2);">Weekly Foot Assessment</div>
+
+        <div style="font-size:12px; font-weight:700; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.04em; color:var(--muted);">Wound description</div>
+        <div class="form-grid" style="margin-bottom:6px;">
+          <div class="form-row"><label class="lbl" style="font-size:12px;">Wound type</label><input name="wd_type" placeholder="e.g. neuropathic ulcer" /></div>
+          <div class="form-row"><label class="lbl" style="font-size:12px;">Duration</label><input name="wd_duration" placeholder="e.g. 3 weeks" /></div>
+        </div>
+        <label class="lbl" style="font-size:12px;">Previous treatments</label>
+        <input name="wd_prev" placeholder="e.g. saline dressings, oral abx" style="margin-bottom:8px;" />
+        <div class="form-grid" style="grid-template-columns:repeat(3,1fr); margin-bottom:6px;">
+          <div class="form-row"><label class="lbl" style="font-size:12px;">Length (mm)</label><input name="wd_len" type="number" min="0" step="0.1" /></div>
+          <div class="form-row"><label class="lbl" style="font-size:12px;">Width (mm)</label><input name="wd_wid" type="number" min="0" step="0.1" /></div>
+          <div class="form-row"><label class="lbl" style="font-size:12px;">Depth (mm)</label><input name="wd_dep" type="number" min="0" step="0.1" /></div>
+        </div>
+        <div class="form-grid" style="margin-bottom:10px;">
+          <div class="form-row"><label class="lbl" style="font-size:12px;">Location</label><select name="wd_loc"><option value="">—</option>${['Dorsal L','Dorsal R','Plantar L','Plantar R','Medial L','Medial R','Lateral L','Lateral R','Heel L','Heel R','Toes L','Toes R'].map(v=>`<option>${v}</option>`).join('')}</select></div>
+          <div class="form-row"><label class="lbl" style="font-size:12px;">Pain (0–10)</label><input name="wd_pain" type="number" min="0" max="10" step="1" /></div>
+        </div>
+
+        <div style="font-size:12px; font-weight:700; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.04em; color:var(--muted);">Wound bed</div>
+        <div style="font-size:11px; font-weight:600; margin-bottom:4px;">Tissue type</div>
+        <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:8px; font-size:13px;">${['necrotic','sloughy','granulating','epithelialising'].map(v=>`<label><input type="checkbox" name="wb_tissue" value="${v}"> ${v}</label>`).join('')}</div>
+        <div style="font-size:11px; font-weight:600; margin-bottom:4px;">Exudate</div>
+        <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:8px; font-size:13px;">${['dry','low','medium','high'].map(v=>`<label><input type="radio" name="wb_exudate" value="${v}"> ${v}</label>`).join('')}</div>
+        <div style="margin-bottom:12px; font-size:13px;"><label><input type="checkbox" name="wb_infection"> Signs of infection</label></div>
+
+        <div style="font-size:12px; font-weight:700; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.04em; color:var(--muted);">Periwound skin (tick + extent in cm)</div>
+        <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:6px 12px; margin-bottom:12px; font-size:13px;">${['maceration','excoriation','dry skin','hyperkeratosis','callus','eczema'].map(v=>`<label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" name="pw_${v.replace(/ /g,'_')}" /> <span style="flex:1;">${v}</span><input type="number" min="0" step="0.1" name="pw_${v.replace(/ /g,'_')}_cm" placeholder="cm" style="width:70px;" /></label>`).join('')}</div>
+
+        <div style="font-size:12px; font-weight:700; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.04em; color:var(--muted);">Wound edge</div>
+        <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:8px; font-size:13px;">${['maceration','dehydration','undermining','rolled edges'].map(v=>`<label><input type="checkbox" name="we" value="${v}"> ${v}</label>`).join('')}</div>
+        <div class="form-grid" style="margin-bottom:12px;">
+          <div class="form-row"><label class="lbl" style="font-size:12px;">Undermining — mark position</label><input name="we_pos" placeholder="e.g. 3 o'clock" /></div>
+          <div class="form-row"><label class="lbl" style="font-size:12px;">Extent (cm)</label><input name="we_extent" type="number" min="0" step="0.1" /></div>
+        </div>
+
+        <div style="font-size:12px; font-weight:700; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.04em; color:var(--muted);">Status</div>
+        <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:12px; font-size:13px;">${['N/A – first visit','Deteriorating','Static','Improving'].map(v=>`<label><input type="radio" name="status" value="${v}"> ${v}</label>`).join('')}</div>
+
+        <div style="font-size:12px; font-weight:700; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.04em; color:var(--muted);">Treatment choice</div>
+        <div class="form-grid" style="margin-bottom:6px;">
+          <div class="form-row"><label class="lbl" style="font-size:12px;">Treatment</label><input name="tx_treatment" placeholder="e.g. debridement" /></div>
+          <div class="form-row"><label class="lbl" style="font-size:12px;">Dressing type/name</label><input name="tx_dressing" placeholder="e.g. foam, hydrocolloid" /></div>
+        </div>
+        <label class="lbl" style="font-size:12px;">Reason for choosing dressing</label>
+        <input name="tx_reason" placeholder="Clinical rationale" style="margin-bottom:12px;" />
+
+        <div style="font-size:12px; font-weight:700; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.04em; color:var(--muted);">Follow-up plan</div>
+        <div class="form-grid">
+          <div class="form-row"><label class="lbl" style="font-size:12px;">Date of next visit</label><input name="fu_date" type="date" /></div>
+          <div class="form-row"><label class="lbl" style="font-size:12px;">Main objective at next visit</label><input name="fu_obj" placeholder="e.g. reassess infection" /></div>
+        </div>
       </div>
       <div class="form-row">
         <label class="lbl">Notes</label>
@@ -1123,13 +1163,22 @@ function openAddEntryModal() {
       ? form.entryTypeCustom.value.trim()
       : typeSelect;
     if (!entryType) throw new Error('Please select or enter an entry type');
-    if (entryType === 'Initial Foot Assessment') {
+    if (entryType === 'Weekly Foot Assessment') {
       const gv = n => Array.from(form.querySelectorAll(`input[name="${n}"]:checked`)).map(el=>el.value);
+      const v = n => (form.querySelector(`[name="${n}"]`)||{}).value || null;
+      const chk = n => !!(form.querySelector(`[name="${n}"]`)||{}).checked;
+      const num = n => { const x = v(n); return x===null||x===''?null:parseFloat(x); };
+      const pwItems = ['maceration','excoriation','dry_skin','hyperkeratosis','callus','eczema']
+        .filter(k => chk('pw_'+k))
+        .map(k => ({ finding: k.replace(/_/g,' '), extent_cm: num('pw_'+k+'_cm') }));
       form.__assessmentData = {
-        wound_bed: { tissue: gv('wb_tissue'), exudate: (form.querySelector('input[name="wb_exudate"]:checked')||{}).value||null, infection: form.querySelector('input[name="wb_infection"]').checked },
-        periwound: gv('pw'),
-        wound_edge: gv('we'),
-        treatment_plan: form.treatment_plan.value.trim()
+        wound_description: { type:v('wd_type'), duration:v('wd_duration'), previous:v('wd_prev'), length_mm:num('wd_len'), width_mm:num('wd_wid'), depth_mm:num('wd_dep'), location:v('wd_loc'), pain:num('wd_pain') },
+        wound_bed: { tissue: gv('wb_tissue'), exudate: (form.querySelector('input[name="wb_exudate"]:checked')||{}).value||null, infection: chk('wb_infection') },
+        periwound: pwItems,
+        wound_edge: { findings: gv('we'), undermining_position: v('we_pos'), extent_cm: num('we_extent') },
+        status: (form.querySelector('input[name="status"]:checked')||{}).value||null,
+        treatment: { treatment:v('tx_treatment'), dressing:v('tx_dressing'), reason:v('tx_reason') },
+        follow_up: { date:v('fu_date'), objective:v('fu_obj') }
       };
     }
     // Use the entry type as the image label so timeline images are tagged automatically
@@ -1142,7 +1191,7 @@ function openAddEntryModal() {
     const sub = document.querySelector('#assessment-subform');
     const notesEl = document.querySelector('textarea[name="notes"]');
     sel?.addEventListener('change', () => {
-      const isIFA = sel.value === 'Initial Foot Assessment';
+      const isIFA = sel.value === 'Weekly Foot Assessment';
       if (sub) sub.style.display = isIFA ? 'block' : 'none';
       if (notesEl) notesEl.required = !isIFA;
     });
@@ -1625,18 +1674,65 @@ function renderPatient() {
               </div>
               ${it.assessment ? (() => {
                 const a = it.assessment;
-                const pill = v => `<span style="display:inline-block; padding:2px 8px; margin:2px 4px 2px 0; font-size:11px; border-radius:999px; background:rgba(16,185,129,0.12); color:var(--fg); border:1px solid rgba(16,185,129,0.3);">${escapeHtml(v)}</span>`;
-                const section = (label, vals) => vals && vals.length ? `<div style="margin-top:6px;"><span style="font-size:11px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:0.04em;">${label}</span><div style="margin-top:2px;">${vals.map(pill).join('')}</div></div>` : '';
+                const esc = escapeHtml;
+                const pill = v => `<span style="display:inline-block; padding:2px 8px; margin:2px 4px 2px 0; font-size:11px; border-radius:999px; background:rgba(16,185,129,0.12); color:var(--fg); border:1px solid rgba(16,185,129,0.3);">${esc(v)}</span>`;
+                const statusPill = v => { const c = v && v.toLowerCase().includes('improv') ? 'rgba(16,185,129,0.18)' : v && v.toLowerCase().includes('deteri') ? 'rgba(239,68,68,0.18)' : v && v.toLowerCase().includes('static') ? 'rgba(234,179,8,0.18)' : 'rgba(128,128,128,0.15)'; return `<span style="display:inline-block; padding:3px 10px; font-size:11px; border-radius:999px; background:${c}; border:1px solid var(--border); font-weight:600;">${esc(v)}</span>`; };
+                const sectionLabel = t => `<div style="font-size:11px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:0.04em; margin-top:10px; margin-bottom:3px;">${t}</div>`;
+                const kv = (k,v) => v!=null && v!=='' ? `<span style="font-size:12px; margin-right:10px;"><span style="color:var(--muted);">${k}:</span> ${esc(String(v))}</span>` : '';
+                let html = '<div style="margin-top:8px; padding:12px; border:1px solid var(--border); border-radius:8px; background:rgba(128,128,128,0.04);">';
+
+                // Wound description (new shape only)
+                const wd = a.wound_description;
+                if (wd) {
+                  const size = [wd.length_mm, wd.width_mm, wd.depth_mm].filter(x=>x!=null).length ? `${wd.length_mm||'?'} × ${wd.width_mm||'?'} × ${wd.depth_mm||'?'} mm` : null;
+                  const parts = [kv('Type',wd.type), kv('Duration',wd.duration), kv('Size',size), kv('Location',wd.location), kv('Pain',wd.pain!=null?wd.pain+'/10':null), kv('Previous',wd.previous)].filter(Boolean);
+                  if (parts.length) html += sectionLabel('Wound description') + '<div>' + parts.join('') + '</div>';
+                }
+
+                // Wound bed
                 const wb = a.wound_bed || {};
                 const wbVals = [...(wb.tissue||[])];
                 if (wb.exudate) wbVals.push('exudate: ' + wb.exudate);
                 if (wb.infection) wbVals.push('signs of infection');
-                return `<div style="margin-top:8px; padding:10px 12px; border:1px solid var(--border); border-radius:8px; background:rgba(128,128,128,0.04);">
-                  ${section('Wound bed', wbVals)}
-                  ${section('Periwound', a.periwound)}
-                  ${section('Wound edge', a.wound_edge)}
-                  ${a.treatment_plan ? `<div style="margin-top:8px; padding-top:8px; border-top:1px dashed var(--border);"><span style="font-size:11px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:0.04em;">Treatment plan</span><p style="font-size:13px; margin:2px 0 0; white-space:pre-wrap; line-height:1.5;">${escapeHtml(a.treatment_plan)}</p></div>` : ''}
-                </div>`;
+                if (wbVals.length) html += sectionLabel('Wound bed') + '<div>' + wbVals.map(pill).join('') + '</div>';
+
+                // Periwound — new shape [{finding, extent_cm}] or old shape [string]
+                if (Array.isArray(a.periwound) && a.periwound.length) {
+                  const pwPills = a.periwound.map(p => typeof p === 'string' ? pill(p) : pill(p.finding + (p.extent_cm!=null?` (${p.extent_cm} cm)`:'')));
+                  html += sectionLabel('Periwound skin') + '<div>' + pwPills.join('') + '</div>';
+                }
+
+                // Wound edge — new shape {findings, undermining_position, extent_cm} or old shape [string]
+                const we = a.wound_edge;
+                if (Array.isArray(we) && we.length) {
+                  html += sectionLabel('Wound edge') + '<div>' + we.map(pill).join('') + '</div>';
+                } else if (we && typeof we === 'object') {
+                  const findings = we.findings || [];
+                  if (findings.length || we.undermining_position || we.extent_cm!=null) {
+                    html += sectionLabel('Wound edge') + '<div>' + findings.map(pill).join('');
+                    if (we.undermining_position) html += pill('undermining @ ' + we.undermining_position);
+                    if (we.extent_cm!=null) html += pill('extent ' + we.extent_cm + ' cm');
+                    html += '</div>';
+                  }
+                }
+
+                if (a.status) html += sectionLabel('Status') + '<div>' + statusPill(a.status) + '</div>';
+
+                // Treatment — new shape {treatment, dressing, reason} or old shape treatment_plan string
+                const tx = a.treatment;
+                if (tx && (tx.treatment || tx.dressing || tx.reason)) {
+                  html += sectionLabel('Treatment') + '<div style="font-size:12px;">' + [kv('Treatment',tx.treatment), kv('Dressing',tx.dressing), kv('Reason',tx.reason)].filter(Boolean).join('') + '</div>';
+                } else if (a.treatment_plan) {
+                  html += sectionLabel('Treatment plan') + `<p style="font-size:13px; margin:0; white-space:pre-wrap; line-height:1.5;">${esc(a.treatment_plan)}</p>`;
+                }
+
+                const fu = a.follow_up;
+                if (fu && (fu.date || fu.objective)) {
+                  html += sectionLabel('Follow-up') + '<div style="font-size:12px;">' + [kv('Next visit',fu.date), kv('Objective',fu.objective)].filter(Boolean).join('') + '</div>';
+                }
+
+                html += '</div>';
+                return html;
               })() : (it.notes ? `<p class="timeline-notes">${escapeHtml(it.notes)}</p>` : '')}
               ${it.images.length > 0 ? `
                 <div class="gallery">
